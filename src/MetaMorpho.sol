@@ -112,14 +112,12 @@ contract MetaMorpho is ERC4626, ERC20Permit, Ownable2Step, Multicall, IMetaMorph
     /// @dev Initializes the contract.
     /// @param owner The owner of the contract.
     /// @param morpho The address of the Morpho contract.
-    /// @param initialTimelock The initial timelock.
     /// @param _asset The address of the underlying asset.
     /// @param _name The name of the vault.
     /// @param _symbol The symbol of the vault.
     constructor(
         address owner,
         address morpho,
-        uint256 initialTimelock,
         address _asset,
         string memory _name,
         string memory _symbol
@@ -129,78 +127,10 @@ contract MetaMorpho is ERC4626, ERC20Permit, Ownable2Step, Multicall, IMetaMorph
         MORPHO = IMorpho(morpho);
         DECIMALS_OFFSET = uint8(uint256(18).zeroFloorSub(IERC20Metadata(_asset).decimals()));
 
-        _checkTimelockBounds(initialTimelock);
-        _setTimelock(initialTimelock);
-
         IERC20(_asset).forceApprove(morpho, type(uint256).max);
     }
 
     /* MODIFIERS */
-
-    /// @dev Reverts if the caller doesn't have the curator role.
-    modifier onlyCuratorRole() {
-        address sender = _msgSender();
-        if (sender != curator && sender != owner()) revert ErrorsLib.NotCuratorRole();
-
-        _;
-    }
-
-    /// @dev Reverts if the caller doesn't have the allocator role.
-    modifier onlyAllocatorRole() {
-        address sender = _msgSender();
-        if (!isAllocator[sender] && sender != curator && sender != owner()) {
-            revert ErrorsLib.NotAllocatorRole();
-        }
-
-        _;
-    }
-
-    /// @dev Reverts if the caller doesn't have the guardian role.
-    modifier onlyGuardianRole() {
-        if (_msgSender() != owner() && _msgSender() != guardian) revert ErrorsLib.NotGuardianRole();
-
-        _;
-    }
-
-    /// @dev Reverts if the caller doesn't have the curator nor the guardian role.
-    modifier onlyCuratorOrGuardianRole() {
-        if (_msgSender() != guardian && _msgSender() != curator && _msgSender() != owner()) {
-            revert ErrorsLib.NotCuratorNorGuardianRole();
-        }
-
-        _;
-    }
-
-    /// @dev Makes sure conditions are met to accept a pending value.
-    /// @dev Reverts if:
-    /// - there's no pending value;
-    /// - the timelock has not elapsed since the pending value has been submitted.
-    modifier afterTimelock(uint256 validAt) {
-        if (validAt == 0) revert ErrorsLib.NoPendingValue();
-        if (block.timestamp < validAt) revert ErrorsLib.TimelockNotElapsed();
-
-        _;
-    }
-
-    /* ONLY OWNER FUNCTIONS */
-
-    /// @inheritdoc IMetaMorphoBase
-    function setCurator(address newCurator) external onlyOwner {
-        if (newCurator == curator) revert ErrorsLib.AlreadySet();
-
-        curator = newCurator;
-
-        emit EventsLib.SetCurator(newCurator);
-    }
-
-    /// @inheritdoc IMetaMorphoBase
-    function setIsAllocator(address newAllocator, bool newIsAllocator) external onlyOwner {
-        if (isAllocator[newAllocator] == newIsAllocator) revert ErrorsLib.AlreadySet();
-
-        isAllocator[newAllocator] = newIsAllocator;
-
-        emit EventsLib.SetIsAllocator(newAllocator, newIsAllocator);
-    }
 
     /// @inheritdoc IMetaMorphoBase
     function setSkimRecipient(address newSkimRecipient) external onlyOwner {
@@ -209,22 +139,6 @@ contract MetaMorpho is ERC4626, ERC20Permit, Ownable2Step, Multicall, IMetaMorph
         skimRecipient = newSkimRecipient;
 
         emit EventsLib.SetSkimRecipient(newSkimRecipient);
-    }
-
-    /// @inheritdoc IMetaMorphoBase
-    function submitTimelock(uint256 newTimelock) external onlyOwner {
-        if (newTimelock == timelock) revert ErrorsLib.AlreadySet();
-        if (pendingTimelock.validAt != 0) revert ErrorsLib.AlreadyPending();
-        _checkTimelockBounds(newTimelock);
-
-        if (newTimelock > timelock) {
-            _setTimelock(newTimelock);
-        } else {
-            // Safe "unchecked" cast because newTimelock <= MAX_TIMELOCK.
-            pendingTimelock.update(uint184(newTimelock), timelock);
-
-            emit EventsLib.SubmitTimelock(newTimelock);
-        }
     }
 
     /// @inheritdoc IMetaMorphoBase
